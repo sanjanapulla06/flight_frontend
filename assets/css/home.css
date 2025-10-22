@@ -1,0 +1,60 @@
+/* fullpage hero layout */
+.hero-section.fullpage {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 6vh 8vw;
+  background: linear-gradient(90deg,#00224a 0%, #00449e 100%);
+  color: #fff;
+}
+
+/* floating plane */
+.hero-left {
+  flex: 0 0 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.hero-plane {
+  width: 100%;
+  max-width: 700px;
+  animation: floaty 6s ease-in-out infinite;
+}
+
+.hero-right {
+  flex: 0 0 45%;
+  text-align: left;
+  padding: 0 30px;
+}
+
+.hero-title {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #7dd3fc;
+  margin-bottom: 10px;
+}
+.hero-subtitle {
+  color: #e8f7ff;
+  font-size: 1.3rem;
+  margin-bottom: 25px;
+}
+
+/* recent searches style */
+.recent-searches .list-group-item {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  transition: background 0.3s ease;
+}
+.recent-searches .list-group-item:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+@keyframes floaty {
+  0% { transform: translateY(0) rotate(-1deg); }
+  50% { transform: translateY(-12px) rotate(1deg); }
+  100% { transform: translateY(0) rotate(-1deg); }
+}

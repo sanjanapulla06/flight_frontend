@@ -1,0 +1,34 @@
+/* ---------- marketplace style additions ---------- */
+.card { border-radius: 12px; }
+.hero-plane { max-width: 380px; opacity: .9; }
+.date-chip, .active-date {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e6eefb;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  text-align:center;
+}
+.active-date {
+  background: linear-gradient(90deg,#1565d8,#1976d2);
+  color: #fff;
+  border: none;
+  box-shadow: 0 6px 18px rgba(13,110,253,0.18);
+}
+.date-chip small { display:block; color:#777; margin-top:6px; }
+.card .btn-success { padding: .45rem .9rem; border-radius:6px; }
+
+/* left filter card */
+aside .card { position: sticky; top: 20px; }
+
+/* promo carousel tweak */
+.carousel .carousel-item { min-height: 54px; display:flex; align-items:center; justify-content:center; }
+
+/* responsive adjustments */
+@media (max-width: 991px) {
+  aside { display:none; }
+  .date-chip, .active-date { font-size: 13px; padding:6px 8px; }
+}
+
+/* MakeMyTrip-ish colors (subtle) */
+.badge { background: #f1f7ff; color: #0d6efd; border-radius: 8px; padding: 6px 8px; }
