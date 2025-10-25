@@ -1,7 +1,5 @@
 <?php
 // book_flight.php
-// Booking UI page. Submits to /api/book_ticket.php via fetch (POST).
-
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 // require login (preserve return)
@@ -11,34 +9,48 @@ if (empty($_SESSION['passport_no'])) {
     exit;
 }
 
-require_once __DIR__ . '/includes/db.php';      // <--- ensure this path exists
-require_once __DIR__ . '/includes/helpers.php'; // safe_start_session() if used
-//safe_start_session(); // optional if helpers provides it
-
-// include header for nav etc.
+require_once __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/includes/helpers.php';
 require_once __DIR__ . '/includes/header.php';
 
-// get integer flight id from GET
-$flight_id = isset($_GET['flight_id']) ? (int)$_GET['flight_id'] : 0;
-if (!$flight_id) {
+// get flight_id from GET (string!)
+$flight_id = isset($_GET['flight_id']) ? trim((string)$_GET['flight_id']) : '';
+if ($flight_id === '') {
     $_SESSION['flash_error'] = 'No flight selected for booking.';
     header('Location: /FLIGHT_FRONTEND/search.php');
     exit;
 }
 
-// fetch flight details
-$flight = null;
-$stmt = $mysqli->prepare("
-    SELECT flight_id, flight_code, source, destination, departure_time, arrival_time, COALESCE(base_price, price, 0) AS price
-    FROM flights
-    WHERE flight_id = ? LIMIT 1
-");
+// detect which flights table exists: prefer "flight", fallback to "flights"
+$flight_table = 'flight';
+$chk = $mysqli->query("SHOW TABLES LIKE 'flight'");
+if (!$chk || $chk->num_rows === 0) {
+    $chk2 = $mysqli->query("SHOW TABLES LIKE 'flights'");
+    if ($chk2 && $chk2->num_rows > 0) $flight_table = 'flights';
+}
+
+// fetch flight details from `flight` (or `flights`) table and airport names
+$sql = "
+    SELECT f.flight_id, f.departure_time, f.arrival_time, COALESCE(f.base_price, f.price, 0) AS price,
+           src.airport_code AS src_code, src.airport_name AS src_name,
+           dst.airport_code AS dst_code, dst.airport_name AS dst_name,
+           a.airline_name
+    FROM {$flight_table} f
+    LEFT JOIN airport src ON f.source_id = src.airport_id
+    LEFT JOIN airport dst ON f.destination_id = dst.airport_id
+    LEFT JOIN airline a ON f.airline_id = a.airline_id
+    WHERE f.flight_id = ? LIMIT 1
+";
+$stmt = $mysqli->prepare($sql);
 if ($stmt) {
-    $stmt->bind_param('i', $flight_id);
+    $stmt->bind_param('s', $flight_id);
     $stmt->execute();
-    $res = $stmt->get_result();
-    $flight = $res->fetch_assoc();
+    $flight = $stmt->get_result()->fetch_assoc();
     $stmt->close();
+} else {
+    $_SESSION['flash_error'] = 'DB error: ' . $mysqli->error;
+    header('Location: /FLIGHT_FRONTEND/search.php');
+    exit;
 }
 
 if (!$flight) {
@@ -54,22 +66,17 @@ $stmt2 = $mysqli->prepare("SELECT passport_no, name, email, phone, address, gend
 if ($stmt2) {
     $stmt2->bind_param('s', $passport_no);
     $stmt2->execute();
-    $res2 = $stmt2->get_result();
-    $passenger = $res2->fetch_assoc() ?: [];
+    $passenger = $stmt2->get_result()->fetch_assoc() ?: [];
     $stmt2->close();
 }
-
-// optional: prefill seat/class from GET (if you have seat map redirect)
-$pref_seat = htmlspecialchars($_GET['seat_no'] ?? '', ENT_QUOTES);
-$pref_class = htmlspecialchars($_GET['class'] ?? '', ENT_QUOTES);
 ?>
 
 <div class="container my-4">
-  <h2 class="mb-3">Book Flight — <small class="text-primary"><?php echo htmlspecialchars($flight['flight_code']); ?></small></h2>
+  <h2 class="mb-3">Book Flight — <small class="text-primary"><?php echo htmlspecialchars($flight['flight_id']); ?></small></h2>
 
   <div class="card mb-3">
     <div class="card-body">
-      <h5 class="mb-1"><?php echo htmlspecialchars($flight['source']); ?> → <?php echo htmlspecialchars($flight['destination']); ?></h5>
+      <h5 class="mb-1"><?php echo htmlspecialchars($flight['src_code'] . ' → ' . $flight['dst_code']); ?> <small class="text-muted">| <?php echo htmlspecialchars($flight['airline_name'] ?? ''); ?></small></h5>
       <div class="text-muted small">
         Departure: <?php echo date('M d, Y H:i', strtotime($flight['departure_time'])); ?> &nbsp;|&nbsp;
         Arrival: <?php echo date('M d, Y H:i', strtotime($flight['arrival_time'])); ?> &nbsp;|&nbsp;
@@ -79,7 +86,7 @@ $pref_class = htmlspecialchars($_GET['class'] ?? '', ENT_QUOTES);
   </div>
 
   <form id="bookForm" class="row g-3" autocomplete="off" method="post">
-    <input type="hidden" name="flight_id" value="<?php echo (int)$flight['flight_id']; ?>" />
+    <input type="hidden" name="flight_id" value="<?php echo htmlspecialchars($flight['flight_id'], ENT_QUOTES); ?>" />
 
     <div class="col-md-6">
       <label class="form-label">Passport No *</label>
@@ -121,14 +128,15 @@ $pref_class = htmlspecialchars($_GET['class'] ?? '', ENT_QUOTES);
     </div>
 
     <div class="col-md-3">
-      <label class="form-label">Seat No</label>
-      <input name="seat_no" class="form-control" placeholder="e.g. A-3 or 12A" required value="<?php echo $pref_seat; ?>" />
+      <label class="form-label">Seat No *</label>
+      <input name="seat_no" class="form-control" placeholder="e.g. 12A" required />
     </div>
 
     <div class="col-md-3">
       <label class="form-label">Class</label>
       <select name="class" class="form-control">
-        <option value="Economy" <?php if($pref_class==='Economy') echo 'selected'; ?>>Economy</option>
+        <option value="Economy">Economy</option>
+        <option value="Business">Business</option>
       </select>
     </div>
 
@@ -147,13 +155,17 @@ $pref_class = htmlspecialchars($_GET['class'] ?? '', ENT_QUOTES);
   const resultDiv = document.getElementById('bookResult');
   const submitBtn = document.getElementById('submitBtn');
 
+  // small helper to escape HTML when showing server text
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     resultDiv.innerHTML = '';
     submitBtn.disabled = true;
     submitBtn.textContent = 'Booking...';
 
-    // simple client-side validation: seat format
     const seat = (form.seat_no.value || '').trim();
     if (!/^[A-Za-z0-9\-\s]+$/.test(seat)) {
       resultDiv.innerHTML = '<div class="alert alert-danger">Invalid seat format.</div>';
@@ -172,33 +184,37 @@ $pref_class = htmlspecialchars($_GET['class'] ?? '', ENT_QUOTES);
         cache: 'no-cache'
       });
 
+      // always show raw server body for debugging clarity
+      const raw = await resp.text();
+      let data = null;
+      try { data = JSON.parse(raw); } catch(e) { data = null; }
+
+      console.log('book_ticket.php status', resp.status, resp.statusText);
+      console.log('book_ticket raw response:', raw);
+
       if (!resp.ok) {
-        const txt = await resp.text().catch(()=>null);
-        console.error('book_ticket.php error', resp.status, txt);
-        let parsed = null;
-        try { parsed = JSON.parse(txt); } catch(e){}
-        const msg = parsed?.error || parsed?.message || ('Server error: ' + resp.status);
-        resultDiv.innerHTML = `<div class="alert alert-danger">${msg}</div>`;
+        const msg = (data && (data.error || data.message)) || raw || ('Server error: ' + resp.status);
+        resultDiv.innerHTML = `<div class="alert alert-danger"><pre style="white-space:pre-wrap">${escapeHtml(msg)}</pre></div>`;
         submitBtn.disabled = false;
         submitBtn.textContent = 'Confirm Booking';
         return;
       }
 
-      const data = await resp.json();
-      if (data.ok) {
+      if (data && data.ok) {
         resultDiv.innerHTML = `<div class="alert alert-success">
             Booking successful! <br>
-            Ticket: <strong>${data.ticket_no}</strong><br>
-            Seat: <strong>${data.seat_no}</strong><br>
-            Class: <strong>${data.class}</strong><br>
+            Ticket: <strong>${escapeHtml(data.ticket_no)}</strong><br>
+            Seat: <strong>${escapeHtml(data.seat_no || '')}</strong><br>
+            Class: <strong>${escapeHtml(data.class || '')}</strong><br>
             Price: <strong>₹${Number(data.price).toLocaleString()}</strong>
           </div>`;
       } else {
-        resultDiv.innerHTML = `<div class="alert alert-danger">${data.error || data.message || 'Booking failed'}</div>`;
+        const msg = (data && (data.error || data.message)) || raw || 'Booking failed';
+        resultDiv.innerHTML = `<div class="alert alert-danger"><pre style="white-space:pre-wrap">${escapeHtml(msg)}</pre></div>`;
       }
     } catch (err) {
       console.error('Fetch error:', err);
-      resultDiv.innerHTML = `<div class="alert alert-danger">Request failed. Check console for details.</div>`;
+      resultDiv.innerHTML = `<div class="alert alert-danger">Request failed. Check console for details. ${escapeHtml(String(err))}</div>`;
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = 'Confirm Booking';

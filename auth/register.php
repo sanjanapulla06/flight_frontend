@@ -1,5 +1,5 @@
-<?php
-// FLIGHT_FRONTEND/auth/register.php
+]<?php
+// /FLIGHT_FRONTEND/auth/register.php
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/helpers.php';
 safe_start_session();
@@ -7,6 +7,10 @@ safe_start_session();
 $err = '';
 $success = '';
 
+/**
+ * Check if a column exists in the current database/table
+ * (we re-declare here to be safe if file is included standalone)
+ */
 function col_exists($mysqli, $table, $col) {
     $sql = "SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1";
     $stmt = $mysqli->prepare($sql);
@@ -33,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strpos($email, '@') === false) {
         $err = 'Please enter a valid email address containing @.';
     } else {
-        // ✅ phone check - exactly 10 digits starting with 6–9
+        // phone cleaning
         $digits_only = preg_replace('/\D+/', '', $phone);
         if ($phone !== '') {
             if (strlen($digits_only) !== 10) {
@@ -43,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // ✅ age validation: must be >= 18
+        // age validation
         if ($err === '') {
             $age = null;
             if ($age_raw !== '') {
@@ -59,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // optional DOB validation
+            // optional DOB check
             $dob = null;
             if ($dob_raw !== '') {
                 $t = date_parse($dob_raw);
@@ -75,83 +79,133 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($err === '') {
-        // generate unique passport number (P + 6 digits)
-        $passport = 'P' . str_pad(mt_rand(1, 999999), 6, '0', STR_PAD_LEFT);
+        // ensure unique passport number generation (attempts loop)
+        $passport = null;
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $candidate = 'P' . str_pad(mt_rand(1, 999999), 6, '0', STR_PAD_LEFT);
+            $chk = $mysqli->prepare("SELECT 1 FROM passenger WHERE passport_no = ? LIMIT 1");
+            if ($chk) {
+                $chk->bind_param('s', $candidate);
+                $chk->execute();
+                $exists = (bool)$chk->get_result()->fetch_row();
+                $chk->close();
+                if (!$exists) { $passport = $candidate; break; }
+            } else {
+                // if check can't be prepared, still use generated candidate (rare)
+                $passport = $candidate; break;
+            }
+        }
+        if ($passport === null) {
+            $err = "Failed to generate unique passport number. Try again.";
+        }
+    }
+
+    if ($err === '') {
         $hash = password_hash($password, PASSWORD_DEFAULT);
 
         // detect columns
         $has_age_col = col_exists($mysqli, 'passenger', 'age');
         $has_dob_col = col_exists($mysqli, 'passenger', 'dob');
         $has_phone_col = col_exists($mysqli, 'passenger', 'phone');
+        $has_role_col = col_exists($mysqli, 'passenger', 'role');
         $has_pw_hash_col = col_exists($mysqli, 'passenger', 'password_hash');
+        $has_pw_plain_col = col_exists($mysqli, 'passenger', 'password');
 
-        // build query dynamically
-        $cols = ['passport_no', 'name', 'email', 'role'];
-        $placeholders = ['?', '?', '?', '?'];
-        $params = [$passport, $name, $email, 'passenger'];
-        $types = 'ssss';
-
-        // optional phone
-        if ($has_phone_col) {
-            $cols[] = 'phone';
-            $placeholders[] = '?';
-            $params[] = $digits_only ?: null;
-            $types .= 's';
-        }
-
-        // include DOB or age if present
-        if ($has_dob_col) {
-            $cols[] = 'dob';
-            $placeholders[] = '?';
-            $params[] = $dob;
-            $types .= 's';
-        }
-        if ($has_age_col) {
-            $cols[] = 'age';
-            $placeholders[] = '?';
-            $params[] = $age;
-            $types .= 'i';
-        }
-
-        // ✅ use correct password column name
-        $pw_col = $has_pw_hash_col ? 'password_hash' : 'password';
-        $cols[] = $pw_col;
-        $placeholders[] = '?';
-        $params[] = $hash;
-        $types .= 's';
-
-        $sql = 'INSERT INTO passenger (' . implode(',', $cols) . ') VALUES (' . implode(',', $placeholders) . ')';
-        $stmt = $mysqli->prepare($sql);
-
-        if (!$stmt) {
-            $err = 'Database prepare error: ' . htmlspecialchars($mysqli->error);
-        } else {
-            $bind_names = [];
-            $bind_names[] = $types;
-            for ($i = 0; $i < count($params); $i++) {
-                $var = 'p' . $i;
-                $$var = $params[$i];
-                $bind_names[] = &$$var;
-            }
-            call_user_func_array([$stmt, 'bind_param'], $bind_names);
-
-            if ($stmt->execute()) {
-                $_SESSION['passport_no'] = $passport;
-                $_SESSION['name'] = $name;
-                $_SESSION['email'] = $email;
-                $_SESSION['role'] = 'passenger';
-                header('Location: /FLIGHT_FRONTEND/search.php');
-                exit;
+        // If the passenger table lacks any password column, try to add password_hash (best effort)
+        if (!$has_pw_hash_col && !$has_pw_plain_col) {
+            $alter_sql = "ALTER TABLE passenger ADD COLUMN password_hash VARCHAR(255) DEFAULT NULL";
+            if ($mysqli->query($alter_sql) === TRUE) {
+                $has_pw_hash_col = true;
             } else {
-                $err = ($mysqli->errno === 1062)
-                    ? 'Email already registered. Try logging in.'
-                    : 'Database error: ' . htmlspecialchars($stmt->error);
+                // if we can't alter, set error and ask admin to add password_hash
+                $err = "Database does not have a password column and automatic migration failed. Please add a `password_hash` VARCHAR(255) column to `passenger` table.";
             }
-            $stmt->close();
+        }
+
+        // proceed if still no error
+        if ($err === '') {
+            // build query dynamically (include role only if column exists)
+            $cols = ['passport_no', 'name', 'email'];
+            $placeholders = ['?', '?', '?'];
+            $params = [$passport, $name, $email];
+            $types = 'sss';
+
+            if ($has_role_col) {
+                $cols[] = 'role';
+                $placeholders[] = '?';
+                $params[] = 'passenger';
+                $types .= 's';
+            }
+
+            if ($has_phone_col) {
+                $cols[] = 'phone';
+                $placeholders[] = '?';
+                $params[] = $digits_only ?: null;
+                $types .= 's';
+            }
+
+            if ($has_dob_col) {
+                $cols[] = 'dob';
+                $placeholders[] = '?';
+                $params[] = $dob;
+                $types .= 's';
+            }
+
+            if ($has_age_col) {
+                $cols[] = 'age';
+                $placeholders[] = '?';
+                $params[] = $age;
+                $types .= 'i';
+            }
+
+            // choose password column (prefer password_hash)
+            $pw_col = $has_pw_hash_col ? 'password_hash' : 'password';
+            $cols[] = $pw_col;
+            $placeholders[] = '?';
+            $params[] = $hash;
+            $types .= 's';
+
+            $sql = 'INSERT INTO passenger (' . implode(',', $cols) . ') VALUES (' . implode(',', $placeholders) . ')';
+            $stmt = $mysqli->prepare($sql);
+
+            if (!$stmt) {
+                $err = 'Database prepare error: ' . htmlspecialchars($mysqli->error);
+            } else {
+                // dynamic bind
+                $bind_names = [];
+                $bind_names[] = $types;
+                for ($i = 0; $i < count($params); $i++) {
+                    $var = 'p' . $i;
+                    $$var = $params[$i];
+                    $bind_names[] = &$$var;
+                }
+                call_user_func_array([$stmt, 'bind_param'], $bind_names);
+
+                if ($stmt->execute()) {
+                    // set session and redirect
+                    session_regenerate_id(true);
+                    $_SESSION['passport_no'] = $passport;
+                    $_SESSION['name'] = $name;
+                    $_SESSION['email'] = $email;
+                    $_SESSION['role'] = $has_role_col ? ($params[array_search('role', $cols)] ?? 'passenger') : 'passenger';
+
+                    header('Location: /FLIGHT_FRONTEND/search.php');
+                    exit;
+                } else {
+                    // unique email constraint check fallback
+                    if ($mysqli->errno === 1062) {
+                        $err = 'Email already registered. Try logging in.';
+                    } else {
+                        $err = 'Database error: ' . htmlspecialchars($stmt->error);
+                    }
+                }
+                $stmt->close();
+            }
         }
     }
 }
 
+// show form (header included below)
 require_once __DIR__ . '/../includes/header.php';
 ?>
 

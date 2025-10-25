@@ -1,12 +1,10 @@
 <?php
-// /FLIGHT_FRONTEND/auth/profile.php  (inline edit + compute age from dob + strict validation + delete-account)
+// /FLIGHT_FRONTEND/auth/profile.php
 require_once __DIR__ . '/../includes/db.php';
-require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/helpers.php';
+safe_start_session();
 
-// ensure session started (safe from header)
-if (session_status() === PHP_SESSION_NONE) session_start();
-
-// require login
+// require login BEFORE printing header
 if (empty($_SESSION['passport_no'])) {
     header('Location: /FLIGHT_FRONTEND/auth/login.php');
     exit();
@@ -14,77 +12,63 @@ if (empty($_SESSION['passport_no'])) {
 
 $passport_no = $_SESSION['passport_no'];
 
-// helper for safe output
+// small helper for safe output
 function safe_val($v, $fallback = '—') {
     return htmlspecialchars($v ?? $fallback, ENT_QUOTES);
 }
 
-// helper: column exists
+// helper: column exists (uses current database)
 function col_exists($mysqli, $table, $col) {
-    $t = $mysqli->real_escape_string($table);
-    $c = $mysqli->real_escape_string($col);
-    $res = $mysqli->query("SHOW COLUMNS FROM `{$t}` LIKE '{$c}'");
-    return ($res && $res->num_rows > 0);
+    $sql = "SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1";
+    $stmt = $mysqli->prepare($sql);
+    if (!$stmt) return false;
+    $stmt->bind_param('ss', $table, $col);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $ok = (bool)$res->fetch_row();
+    $stmt->close();
+    return $ok;
 }
 
+// detect whether passenger table has age / dob
+$has_age_col = col_exists($mysqli, 'passenger', 'age');
+$has_dob_col  = col_exists($mysqli, 'passenger', 'dob');
+
 // ---------- DELETE ACCOUNT handler ----------
-// If user submitted deletion, run transactional delete then destroy session and redirect.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_account') {
-    // small safety double-check server-side: passport must match session
+    // server-side safety: passport matches session
     $del_passport = $passport_no;
 
+    // verify tables exist
     $has_ticket_table = $mysqli->query("SHOW TABLES LIKE 'ticket'")->num_rows > 0;
     $has_bookings_table = $mysqli->query("SHOW TABLES LIKE 'bookings'")->num_rows > 0;
     $has_passenger_table = $mysqli->query("SHOW TABLES LIKE 'passenger'")->num_rows > 0;
 
-    // begin transaction
     $mysqli->begin_transaction();
-    $ok = true;
-    $err_msg = '';
-
     try {
         if ($has_bookings_table) {
             $stmt = $mysqli->prepare("DELETE FROM bookings WHERE passport_no = ?");
-            if ($stmt) {
-                $stmt->bind_param('s', $del_passport);
-                if (!$stmt->execute()) {
-                    throw new Exception("Failed to delete bookings: " . $stmt->error);
-                }
-                $stmt->close();
-            }
+            if ($stmt) { $stmt->bind_param('s', $del_passport); $stmt->execute(); $stmt->close(); }
         }
 
         if ($has_ticket_table) {
-            // tickets may be named `ticket` in your schema
             $stmt = $mysqli->prepare("DELETE FROM ticket WHERE passport_no = ?");
-            if ($stmt) {
-                $stmt->bind_param('s', $del_passport);
-                if (!$stmt->execute()) {
-                    throw new Exception("Failed to delete tickets: " . $stmt->error);
-                }
-                $stmt->close();
-            }
+            if ($stmt) { $stmt->bind_param('s', $del_passport); $stmt->execute(); $stmt->close(); }
         }
 
         if ($has_passenger_table) {
             $stmt = $mysqli->prepare("DELETE FROM passenger WHERE passport_no = ? LIMIT 1");
-            if ($stmt) {
-                $stmt->bind_param('s', $del_passport);
-                if (!$stmt->execute()) {
-                    throw new Exception("Failed to delete passenger row: " . $stmt->error);
-                }
-                $stmt->close();
-            } else {
-                throw new Exception("Failed to prepare passenger delete: " . $mysqli->error);
-            }
+            if (!$stmt) throw new Exception("Failed to prepare passenger delete: " . $mysqli->error);
+            $stmt->bind_param('s', $del_passport);
+            if (!$stmt->execute()) throw new Exception("Failed to delete passenger row: " . $stmt->error);
+            $stmt->close();
         } else {
             throw new Exception("Passenger table not found.");
         }
 
-        // commit if all good
         $mysqli->commit();
 
-        // clear session & send user to homepage with a message (JS redirect since header.php already printed)
+        // destroy session and redirect to homepage
         $_SESSION = [];
         if (ini_get("session.use_cookies")) {
             $params = session_get_cookie_params();
@@ -95,26 +79,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
         session_destroy();
 
-        // Render immediate success alert then redirect with JS (gently)
-        echo '<div class="container mt-4"><div class="alert alert-success">Your account and related data have been deleted. Redirecting to home...</div></div>';
-        echo '<script>setTimeout(function(){ window.location = "/FLIGHT_FRONTEND/index.php"; }, 1500);</script>';
-        // stop the rest of the page
+        header('Location: /FLIGHT_FRONTEND/index.php');
         exit();
     } catch (Exception $e) {
         $mysqli->rollback();
-        $err_msg = $e->getMessage();
-        $_SESSION['flash_error'] = "Failed to delete account: " . htmlspecialchars($err_msg);
-        // continue rendering the page so user sees the flash error
+        safe_start_session(); // ensure we can set flash
+        $_SESSION['flash_error'] = "Failed to delete account: " . htmlspecialchars($e->getMessage());
+        // continue to render the page so user sees the flash error after header include
     }
 }
 // ---------- end delete handler ----------
 
 
-// detect whether passenger table has age / dob
-$has_age_col = col_exists($mysqli, 'passenger', 'age');
-$has_dob_col  = col_exists($mysqli, 'passenger', 'dob');
-
-// POST handler for inline edit
+// ---------- PROFILE UPDATE handler ----------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_profile') {
     $phone = trim($_POST['phone'] ?? '');
     $age   = trim($_POST['age'] ?? '');
@@ -125,16 +102,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $phone_sanitized = preg_replace('/[^\d\+\-\(\) ]+/', '', $phone);
     $digits_only = preg_replace('/\D+/', '', $phone_sanitized);
 
-    // phone optional, but if present must be 7-10 digits
     if ($phone !== '') {
         if (strlen($digits_only) < 7) {
             $errors[] = "Phone number must contain at least 7 digits.";
-        } elseif (strlen($digits_only) > 10) {
-            $errors[] = "Phone number must be at most 10 digits.";
+        } elseif (strlen($digits_only) > 15) {
+            $errors[] = "Phone number seems too long.";
         }
     }
 
-    // age optional, but if provided must be integer and >= 18
     $age_i = null;
     if ($age !== '') {
         if (!ctype_digit($age)) {
@@ -148,58 +123,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     if (empty($errors)) {
         $ok = false;
-        // Update according to schema availability
         if ($has_age_col) {
             if ($age_i === null) {
                 $sql = "UPDATE passenger SET phone = ?, age = NULL WHERE passport_no = ?";
                 $stmt = $mysqli->prepare($sql);
-                if ($stmt) {
-                    $stmt->bind_param('ss', $phone_sanitized, $passport_no);
-                    $ok = $stmt->execute();
-                    $stmt->close();
-                }
+                if ($stmt) { $stmt->bind_param('ss', $phone_sanitized, $passport_no); $ok = $stmt->execute(); $stmt->close(); }
             } else {
                 $sql = "UPDATE passenger SET phone = ?, age = ? WHERE passport_no = ?";
                 $stmt = $mysqli->prepare($sql);
-                if ($stmt) {
-                    $stmt->bind_param('sis', $phone_sanitized, $age_i, $passport_no);
-                    $ok = $stmt->execute();
-                    $stmt->close();
-                }
+                if ($stmt) { $stmt->bind_param('sis', $phone_sanitized, $age_i, $passport_no); $ok = $stmt->execute(); $stmt->close(); }
             }
         } elseif ($has_dob_col) {
             if ($age_i === null) {
-                // update only phone
                 $sql = "UPDATE passenger SET phone = ? WHERE passport_no = ?";
                 $stmt = $mysqli->prepare($sql);
-                if ($stmt) {
-                    $stmt->bind_param('ss', $phone_sanitized, $passport_no);
-                    $ok = $stmt->execute();
-                    $stmt->close();
-                }
+                if ($stmt) { $stmt->bind_param('ss', $phone_sanitized, $passport_no); $ok = $stmt->execute(); $stmt->close(); }
             } else {
-                // compute approximate dob as today minus age years
+                // approximate dob = today - age years
                 $dob_dt = new DateTimeImmutable('today');
                 $dob_dt = $dob_dt->sub(new DateInterval('P' . $age_i . 'Y'));
                 $dob_str = $dob_dt->format('Y-m-d');
 
                 $sql = "UPDATE passenger SET phone = ?, dob = ? WHERE passport_no = ?";
                 $stmt = $mysqli->prepare($sql);
-                if ($stmt) {
-                    $stmt->bind_param('sss', $phone_sanitized, $dob_str, $passport_no);
-                    $ok = $stmt->execute();
-                    $stmt->close();
-                }
+                if ($stmt) { $stmt->bind_param('sss', $phone_sanitized, $dob_str, $passport_no); $ok = $stmt->execute(); $stmt->close(); }
             }
         } else {
-            // no age/dob column, only update phone
             $sql = "UPDATE passenger SET phone = ? WHERE passport_no = ?";
             $stmt = $mysqli->prepare($sql);
-            if ($stmt) {
-                $stmt->bind_param('ss', $phone_sanitized, $passport_no);
-                $ok = $stmt->execute();
-                $stmt->close();
-            }
+            if ($stmt) { $stmt->bind_param('ss', $phone_sanitized, $passport_no); $ok = $stmt->execute(); $stmt->close(); }
         }
 
         if ($ok) {
@@ -218,9 +170,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit;
     }
 }
+// ---------- end update handler ----------
 
-// GET: fetch user and bookings
-$select_cols = "name, email, passport_no, role, phone";
+
+// now include header (safe — all POST handlers that redirect already exited)
+require_once __DIR__ . '/../includes/header.php';
+
+
+// GET: fetch user record
+$select_cols = "name, email, passport_no, phone";
 if ($has_age_col) $select_cols .= ", age";
 if ($has_dob_col)  $select_cols .= ", dob";
 
@@ -252,11 +210,19 @@ if ($has_age_col && isset($user['age']) && $user['age'] !== null && $user['age']
     $display_age = null;
 }
 
-// fetch bookings
+// fetch bookings with airport join for friendly route
 $bookings_query = "
-  SELECT b.booking_id, f.flight_code, f.source, f.destination, b.booking_date, b.status
+  SELECT b.booking_id,
+         f.flight_id,
+         a_src.airport_code AS src_code,
+         a_dst.airport_code AS dst_code,
+         f.flight_date,
+         b.booking_date,
+         b.status
   FROM bookings b
-  JOIN flights f ON b.flight_id = f.flight_id
+  JOIN flight f ON b.flight_id = f.flight_id
+  LEFT JOIN airport a_src ON f.source_id = a_src.airport_id
+  LEFT JOIN airport a_dst ON f.destination_id = a_dst.airport_id
   WHERE b.passport_no = ?
   ORDER BY b.booking_date DESC
 ";
@@ -278,7 +244,7 @@ if ($stmt2) {
       <div>
         <button id="editToggleBtn" class="btn btn-sm btn-outline-primary me-2">Edit</button>
 
-        <!-- Delete account button (replaces logout) -->
+        <!-- Delete account button -->
         <form id="deleteAccountForm" method="post" style="display:inline;">
           <input type="hidden" name="action" value="delete_account">
           <button id="deleteAccountBtn" type="submit" class="btn btn-sm btn-danger"
@@ -286,7 +252,6 @@ if ($stmt2) {
             Delete Account
           </button>
         </form>
-
       </div>
     </div>
 
@@ -332,7 +297,7 @@ if ($stmt2) {
         <div class="col-md-6">
           <label class="form-label">Phone (optional)</label>
           <input id="phoneInput" class="form-control" type="text" name="phone" value="<?php echo safe_val($user['phone'], ''); ?>" placeholder="+91 98765 43210">
-          <div class="form-text">Digits only: 7–10 digits. You may include +, -, spaces, parentheses.</div>
+          <div class="form-text">Digits only: 7–15 digits. You may include +, -, spaces, parentheses.</div>
           <div id="phoneError" class="text-danger small mt-1" style="display:none;"></div>
         </div>
 
@@ -363,7 +328,8 @@ if ($stmt2) {
             <th>Booking ID</th>
             <th>Flight</th>
             <th>Route</th>
-            <th>Date</th>
+            <th>Flight Date</th>
+            <th>Booked On</th>
             <th>Status</th>
             <th></th>
           </tr>
@@ -372,9 +338,10 @@ if ($stmt2) {
           <?php while($row = $bookings_result->fetch_assoc()): ?>
           <tr>
             <td><?php echo safe_val($row['booking_id']); ?></td>
-            <td><?php echo safe_val($row['flight_code']); ?></td>
-            <td><?php echo safe_val($row['source']) . ' → ' . safe_val($row['destination']); ?></td>
-            <td><?php echo safe_val(date('M d, Y', strtotime($row['booking_date']))); ?></td>
+            <td><?php echo safe_val($row['flight_id']); ?></td>
+            <td><?php echo safe_val($row['src_code']) . ' → ' . safe_val($row['dst_code']); ?></td>
+            <td><?php echo safe_val($row['flight_date'] ? date('M d, Y', strtotime($row['flight_date'])) : '—'); ?></td>
+            <td><?php echo safe_val($row['booking_date'] ? date('M d, Y H:i', strtotime($row['booking_date'])) : '—'); ?></td>
             <td><?php echo safe_val(ucfirst($row['status'])); ?></td>
             <td>
               <a class="btn btn-sm btn-primary" href="/FLIGHT_FRONTEND/e_ticket.php?booking_id=<?php echo urlencode($row['booking_id']); ?>" target="_blank" rel="noopener noreferrer">View E-ticket</a>
@@ -392,7 +359,6 @@ if ($stmt2) {
 </div>
 
 <script>
-  // Inline edit toggle + client-side validation for phone & age (7-10 digits; age >= 18)
   (function(){
     const editBtn = document.getElementById('editToggleBtn');
     const viewEl = document.getElementById('viewProfile');
@@ -405,7 +371,6 @@ if ($stmt2) {
     const ageError = document.getElementById('ageError');
     const saveBtn = document.getElementById('saveBtn');
     const deleteForm = document.getElementById('deleteAccountForm');
-    const deleteBtn = document.getElementById('deleteAccountBtn');
 
     function showEdit() {
       viewEl.style.display = 'none';
@@ -439,8 +404,8 @@ if ($stmt2) {
         phoneError.style.display = 'block';
         return false;
       }
-      if (digits.length > 10) {
-        phoneError.textContent = "Phone must be at most 10 digits.";
+      if (digits.length > 15) {
+        phoneError.textContent = "Phone seems too long.";
         phoneError.style.display = 'block';
         return false;
       }
@@ -484,7 +449,6 @@ if ($stmt2) {
       return true;
     });
 
-    // protect delete form with JS confirm (also server checks)
     if (deleteForm) {
       deleteForm.addEventListener('submit', function(e){
         const ok = confirm('Are you absolutely sure? This will permanently delete your account and all related bookings/tickets.');
