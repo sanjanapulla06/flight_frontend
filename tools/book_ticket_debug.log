@@ -1,3 +1,5 @@
 [2025-10-25 10:05:41] Booking success: {"ok":true,"ticket_no":"SQ251029-P669077-17","booking_id":17,"price":2024,"seat_no":"13C","class":"Economy"}
 [2025-10-25 11:49:58] Booking success: {"ok":true,"ticket_no":"BA251029-P868286-18","booking_id":18,"price":2018,"seat_no":"30C","class":"Economy"}
 [2025-10-25 12:15:55] Booking success: {"ok":true,"ticket_no":"UK251029-P847420-19","booking_id":19,"price":2047,"seat_no":"13A","class":"Economy"}
+[2025-10-26 12:25:50] Booking success: {"ok":true,"ticket_no":"EK251028-P868286-20","booking_id":20,"price":2022,"seat_no":"30C","class":"Economy"}
+[2025-10-26 13:51:35] Booking success: {"ok":true,"ticket_no":"BA251031-P847420-21","booking_id":21,"price":2019,"seat_no":"15A","class":"Economy"}

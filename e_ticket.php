@@ -1,5 +1,5 @@
 <?php
-// /FLIGHT_FRONTEND/e_ticket.php (fixed: all queries use dynamic fragments for source/destination/time/price)
+// /FLIGHT_FRONTEND/e_ticket.php (with Gate / Terminal / Baggage Belt - latest row chosen)
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/helpers.php';
 safe_start_session();
@@ -23,7 +23,7 @@ $passport   = $_SESSION['passport_no'] ?? '';
 $data = null;
 $source_table = null;
 
-// helpers
+/* ---------- helpers ---------- */
 function col_exists($mysqli, $table, $col) {
     $t = $mysqli->real_escape_string($table);
     $c = $mysqli->real_escape_string($col);
@@ -45,24 +45,24 @@ function pick_aliased_col($mysqli, $table, $candidates, $alias, $fallback = "NUL
     return "{$fallback} AS {$alias}";
 }
 
-// detect flight table
+/* ---------- detect flight table ---------- */
 $flight_table = detect_flights_table($mysqli);
 
-// fragments used everywhere
+/* fragments used everywhere */
 $pnr_cols = ['flight_code','flight_no','flight_number','code','flightid','flight_id'];
 $price_cols = ['base_price','price','fare','amount','f_price'];
 
-// time fragments
+/* time fragments */
 $d_time_frag = col_exists($mysqli, $flight_table, 'd_time') ? "f.d_time AS d_time"
              : (col_exists($mysqli, $flight_table, 'departure_time') ? "f.departure_time AS d_time" : "NULL AS d_time");
 $a_time_frag = col_exists($mysqli, $flight_table, 'a_time') ? "f.a_time AS a_time"
              : (col_exists($mysqli, $flight_table, 'arrival_time') ? "f.arrival_time AS a_time" : "NULL AS a_time");
 
-// pnr / price fragments
+/* pnr / price fragments */
 $pnr_frag = pick_aliased_col($mysqli, $flight_table, $pnr_cols, 'pnr_code', "NULL");
 $price_frag = pick_aliased_col($mysqli, $flight_table, $price_cols, 'price', "0");
 
-// source / destination fragments (aliased pair)
+/* source / destination fragments (aliased pair) */
 $use_src_id = col_exists($mysqli, $flight_table, 'source_id');
 $use_dst_id = col_exists($mysqli, $flight_table, 'destination_id');
 
@@ -75,7 +75,6 @@ if ($use_src_id) {
     $src_join = " LEFT JOIN airport src ON f.source_id = src.airport_id ";
     $src_select = "src.airport_code AS src_code, src.airport_name AS src_name";
 } elseif (col_exists($mysqli, $flight_table, 'source')) {
-    // string column present
     $src_select = "NULL AS src_code, f.source AS src_name";
 }
 
@@ -86,11 +85,58 @@ if ($use_dst_id) {
     $dst_select = "NULL AS dst_code, f.destination AS dst_name";
 }
 
-// airline fragments
+/* airline fragments */
 $airline_join = col_exists($mysqli, $flight_table, 'airline_id') ? " LEFT JOIN airline al ON f.airline_id = al.airline_id " : "";
 $airline_select = col_exists($mysqli, $flight_table, 'airline_id') ? "al.airline_name AS airline_name" : "NULL AS airline_name";
 
-// ---------- Lookups (all use the dynamic fragments) ----------
+/* ---------- flight_ground_info: join most recent row ---------- */
+$ground_select_fragment = "NULL AS gate, NULL AS terminal, NULL AS baggage_belt";
+$ground_join_fragment = "";
+if ($mysqli->query("SHOW TABLES LIKE 'flight_ground_info'")->num_rows > 0) {
+    // check columns in ground table
+    $gcols = [];
+    $gres = $mysqli->query("SHOW COLUMNS FROM flight_ground_info");
+    if ($gres) while ($c = $gres->fetch_assoc()) $gcols[] = $c['Field'];
+
+    $col_gate = in_array('gate', $gcols) ? 'gate' : (in_array('g_gate', $gcols) ? 'g_gate' : null);
+    $col_terminal = in_array('terminal', $gcols) ? 'terminal' : (in_array('term', $gcols) ? 'term' : null);
+    $col_belt = in_array('baggage_belt', $gcols) ? 'baggage_belt' : (in_array('belt', $gcols) ? 'belt' : null);
+
+    // guard: we expect flight_ground_info to have flight_id or flight column to join on
+    $join_key = in_array('flight_id', $gcols) ? 'flight_id' : (in_array('flight', $gcols) ? 'flight' : null);
+
+    if ($join_key && ($col_gate || $col_terminal || $col_belt)) {
+        // Choose latest row per flight:
+        // If updated_at exists, join by the row having MAX(updated_at); otherwise fallback to MAX(info_id).
+        $has_updated_at = in_array('updated_at', $gcols);
+
+        if ($has_updated_at) {
+            // use subquery to pick latest updated_at per flight
+            $ground_join_fragment = "
+              LEFT JOIN flight_ground_info g ON f.flight_id = g.flight_id
+              AND g.updated_at = (
+                SELECT MAX(g2.updated_at) FROM flight_ground_info g2 WHERE g2.flight_id = f.flight_id
+              )
+            ";
+        } else {
+            // fallback: pick row with highest info_id per flight
+            $ground_join_fragment = "
+              LEFT JOIN flight_ground_info g ON f.flight_id = g.flight_id
+              AND g.info_id = (
+                SELECT MAX(g2.info_id) FROM flight_ground_info g2 WHERE g2.flight_id = f.flight_id
+              )
+            ";
+        }
+
+        $parts = [];
+        $parts[] = $col_gate ? "g.`{$col_gate}` AS gate" : "NULL AS gate";
+        $parts[] = $col_terminal ? "g.`{$col_terminal}` AS terminal" : "NULL AS terminal";
+        $parts[] = $col_belt ? "g.`{$col_belt}` AS baggage_belt" : "NULL AS baggage_belt";
+        $ground_select_fragment = implode(', ', $parts);
+    }
+}
+
+/* ---------- Lookups (using dynamic fragments) ---------- */
 
 // 1) booking lookup by booking_id
 if ($booking_id !== null && $booking_id !== '') {
@@ -98,10 +144,13 @@ if ($booking_id !== null && $booking_id !== '') {
       SELECT b.booking_id AS ticket_no, b.booking_date, b.status,
              f.flight_id, {$pnr_frag}, {$src_select}, {$dst_select},
              {$d_time_frag}, {$a_time_frag}, {$price_frag},
-             b.seat_no AS seat_no, b.class AS class, b.passport_no AS booked_passport
+             b.seat_no AS seat_no, b.class AS class, b.passport_no AS booked_passport,
+             {$airline_select},
+             {$ground_select_fragment}
       FROM bookings b
       JOIN {$flight_table} f ON b.flight_id = f.flight_id
       {$src_join} {$dst_join} {$airline_join}
+      {$ground_join_fragment}
       WHERE b.booking_id = ? AND b.passport_no = ?
       LIMIT 1
     ";
@@ -127,10 +176,13 @@ if (!$data && $ticket_no) {
     $sql = "
       SELECT t.ticket_no, t.booking_date, t.passport_no AS booked_passport, t.seat_no, t.class,
              f.flight_id, {$pnr_frag}, {$src_select}, {$dst_select},
-             {$d_time_frag}, {$a_time_frag}, {$price_frag}
+             {$d_time_frag}, {$a_time_frag}, {$price_frag},
+             {$airline_select},
+             {$ground_select_fragment}
       FROM ticket t
       LEFT JOIN {$flight_table} f ON t.flight_id = f.flight_id
       {$src_join} {$dst_join} {$airline_join}
+      {$ground_join_fragment}
       WHERE t.ticket_no = ? AND t.passport_no = ? LIMIT 1
     ";
     $stmt = $mysqli->prepare($sql);
@@ -150,10 +202,13 @@ if (!$data) {
     $sql = "
       SELECT t.ticket_no, t.booking_date, t.passport_no AS booked_passport, t.seat_no, t.class,
              f.flight_id, {$pnr_frag}, {$src_select}, {$dst_select},
-             {$d_time_frag}, {$a_time_frag}, {$price_frag}
+             {$d_time_frag}, {$a_time_frag}, {$price_frag},
+             {$airline_select},
+             {$ground_select_fragment}
       FROM ticket t
       LEFT JOIN {$flight_table} f ON t.flight_id = f.flight_id
       {$src_join} {$dst_join} {$airline_join}
+      {$ground_join_fragment}
       WHERE t.passport_no = ?
       ORDER BY t.booking_date DESC LIMIT 1
     ";
@@ -175,10 +230,13 @@ if (!$data) {
       SELECT b.booking_id AS ticket_no, b.booking_date, b.status,
              f.flight_id, {$pnr_frag}, {$src_select}, {$dst_select},
              {$d_time_frag}, {$a_time_frag}, {$price_frag},
-             b.seat_no AS seat_no, b.class AS class, b.passport_no AS booked_passport
+             b.seat_no AS seat_no, b.class AS class, b.passport_no AS booked_passport,
+             {$airline_select},
+             {$ground_select_fragment}
       FROM bookings b
       JOIN {$flight_table} f ON b.flight_id = f.flight_id
       {$src_join} {$dst_join} {$airline_join}
+      {$ground_join_fragment}
       WHERE b.passport_no = ?
       ORDER BY b.booking_date DESC LIMIT 1
     ";
@@ -200,10 +258,9 @@ if (!$data) {
     exit;
 }
 
-// If some fields still missing, do a direct flight lookup by flight_id to enrich data
+/* ---------- Enrich flight-level info if missing (also get ground info) ---------- */
 $flight_id = $data['flight_id'] ?? null;
 if ($flight_id) {
-    // build a flight-level query (reuse fragments)
     $dep_select = col_exists($mysqli, $flight_table, 'departure_time') ? "f.departure_time AS departure_time"
                  : (col_exists($mysqli, $flight_table, 'd_time') ? "f.d_time AS departure_time" : "NULL AS departure_time");
     $arr_select = col_exists($mysqli, $flight_table, 'arrival_time') ? "f.arrival_time AS arrival_time"
@@ -211,9 +268,11 @@ if ($flight_id) {
 
     $sql = "
       SELECT f.flight_id, {$pnr_frag}, {$dep_select}, {$arr_select}, {$price_frag}, {$airline_select},
-             {$src_select}, {$dst_select}
+             {$src_select}, {$dst_select},
+             {$ground_select_fragment}
       FROM {$flight_table} f
       {$src_join} {$dst_join} {$airline_join}
+      {$ground_join_fragment}
       WHERE f.flight_id = ? LIMIT 1
     ";
     $stmt = $mysqli->prepare($sql);
@@ -232,11 +291,15 @@ if ($flight_id) {
             if ((empty($data['price']) || $data['price'] === '0') && isset($frow['price'])) $data['price'] = $frow['price'];
             if (empty($data['airline_name']) && !empty($frow['airline_name'])) $data['airline_name'] = $frow['airline_name'];
             if (empty($data['pnr_code']) && !empty($frow['pnr_code'])) $data['pnr_code'] = $frow['pnr_code'];
+            // ground info (if present)
+            if (empty($data['gate']) && isset($frow['gate'])) $data['gate'] = $frow['gate'];
+            if (empty($data['terminal']) && isset($frow['terminal'])) $data['terminal'] = $frow['terminal'];
+            if (empty($data['baggage_belt']) && isset($frow['baggage_belt'])) $data['baggage_belt'] = $frow['baggage_belt'];
         }
     }
 }
 
-// ensure passenger name present
+/* ---------- Passenger name ---------- */
 $passenger_name = $_SESSION['name'] ?? null;
 if (empty($passenger_name)) {
     $p_pass = $data['booked_passport'] ?? $passport;
@@ -253,13 +316,13 @@ if (empty($passenger_name)) {
 }
 if (empty($passenger_name)) $passenger_name = 'Passenger';
 
-// formatting helpers
+/* ---------- formatting helpers ---------- */
 function safe($v, $fallback = '—') { return htmlspecialchars($v ?? $fallback); }
 function fmt_full($raw) { if (!$raw) return 'Unknown'; $ts = strtotime($raw); return $ts ? date('d M Y, h:i A', $ts) : htmlspecialchars($raw); }
 function fmt_time($raw) { if (!$raw) return '—'; $ts = strtotime($raw); return $ts ? date('h:i A', $ts) : htmlspecialchars($raw); }
 function fmt_date($raw) { if (!$raw) return '—'; $ts = strtotime($raw); return $ts ? date('d M Y', $ts) : htmlspecialchars($raw); }
 
-// Resolve fields
+/* ---------- Resolve fields ---------- */
 $ticket_id = $data['ticket_no'] ?? $data['booking_id'] ?? ($data['pnr_code'] ?? null) ?? '—';
 $pnr = $data['pnr_code'] ?? $data['pnr'] ?? $ticket_id;
 $flight_id = $data['flight_id'] ?? ($data['flight_code'] ?? null);
@@ -289,7 +352,17 @@ $booked_on = $booked_on_raw ? fmt_full($booked_on_raw) : 'Unknown';
 
 $passport_display = $data['booked_passport'] ?? $passport;
 
-// Output boarding-pass UI (kept layout similar to your previous markup)
+/* ---------- Ground info (final fallbacks) ---------- */
+$gate = $data['gate'] ?? ($data['g_gate'] ?? null);
+$terminal = $data['terminal'] ?? ($data['term'] ?? null);
+$belt = $data['baggage_belt'] ?? ($data['belt'] ?? null);
+
+// final very-small fallback: if still empty, show dash
+if (empty($gate)) $gate = '—';
+if (empty($terminal)) $terminal = '—';
+if (empty($belt)) $belt = '—';
+
+/* ---------- Output boarding-pass UI ---------- */
 ?>
 <style>
 .boarding-wrap{max-width:980px;margin:24px auto;padding:20px;font-family:Inter,system-ui,Arial}
@@ -345,6 +418,21 @@ $passport_display = $data['booked_passport'] ?? $passport;
         <strong>Booked on:</strong> <?= safe($booked_on) ?> &nbsp; Passport: <?= safe($passport_display) ?>
       </div>
 
+      <div style="margin-top:12px; display:flex; gap:10px;">
+        <div style="flex:1" class="small">
+          <strong>Gate</strong><br>
+          <div style="font-weight:700; margin-top:4px;"><?= safe($gate) ?></div>
+        </div>
+        <div style="flex:1" class="small">
+          <strong>Terminal</strong><br>
+          <div style="font-weight:700; margin-top:4px;"><?= safe($terminal) ?></div>
+        </div>
+        <div style="flex:1" class="small">
+          <strong>Belt</strong><br>
+          <div style="font-weight:700; margin-top:4px;"><?= safe($belt) ?></div>
+        </div>
+      </div>
+
       <div class="barcode" aria-hidden="true"></div>
     </div>
 
@@ -371,6 +459,18 @@ $passport_display = $data['booked_passport'] ?? $passport;
           <div style="font-size:.82rem;color:#6b7280">Route</div>
           <div style="font-weight:700;font-size:1.02rem;color:#111827"><?= safe($src_code ?: $source_name) ?> → <?= safe($dst_code ?: $destination_name) ?></div>
         </div>
+
+        <div style="margin-top:10px; display:flex; gap:10px;">
+          <div style="flex:1">
+            <div style="font-size:.78rem;color:#6b7280">Gate</div>
+            <div style="font-weight:700"><?= safe($gate) ?></div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:.78rem;color:#6b7280">Terminal</div>
+            <div style="font-weight:700"><?= safe($terminal) ?></div>
+          </div>
+        </div>
+
       </div>
 
       <div>

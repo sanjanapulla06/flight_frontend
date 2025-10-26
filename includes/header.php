@@ -52,6 +52,10 @@ $user_phone = htmlspecialchars($_SESSION['phone'] ?? '', ENT_QUOTES);
         <li class="nav-item">
           <a class="nav-link <?php echo ($current === 'search.php' || $current === 'index.php') ? 'active' : ''; ?>"
              href="<?php echo $BASE; ?>/search.php">Search</a>
+        <li class="nav-item">
+          <li class="nav-item"><a class="nav-link" href="/FLIGHT_FRONTEND/flight_board.php">Flight Board</a></li>
+</li>
+
         </li>
       </ul>
 

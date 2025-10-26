@@ -30,11 +30,141 @@ function col_exists($mysqli, $table, $col) {
     return $ok;
 }
 
-// detect whether passenger table has age / dob
-$has_age_col = col_exists($mysqli, 'passenger', 'age');
-$has_dob_col  = col_exists($mysqli, 'passenger', 'dob');
+/* ----------------------------
+   Loyalty points logic
+   - If a loyalty table exists we read stored points/tier.
+   - Else compute points from ticket or bookings/flight prices.
+   - Convert total_spend -> points using a rule: 1 point per 100 currency units (changeable).
+   - Compute tier by thresholds.
+   ---------------------------- */
 
-// ---------- DELETE ACCOUNT handler ----------
+function detect_loyalty_table($mysqli) {
+    $candidates = ['loyalty', 'loyalty_points', 'frequent_flyer', 'ff_members'];
+    foreach ($candidates as $t) {
+        $r = $mysqli->query("SHOW TABLES LIKE '" . $mysqli->real_escape_string($t) . "'");
+        if ($r && $r->num_rows > 0) return $t;
+    }
+    return null;
+}
+
+function fetch_loyalty_from_table($mysqli, $table, $passport) {
+    // be defensive about column names
+    $cols = [];
+    $r = $mysqli->query("SHOW COLUMNS FROM `{$table}`");
+    if ($r) while ($c = $r->fetch_assoc()) $cols[] = $c['Field'];
+
+    $col_pass = in_array('passport_no', $cols) ? 'passport_no' : (in_array('member_id', $cols) ? 'member_id' : null);
+    $col_points = in_array('points', $cols) ? 'points' : (in_array('balance', $cols) ? 'balance' : null);
+    $col_tier = in_array('tier', $cols) ? 'tier' : (in_array('status', $cols) ? 'status' : null);
+    $col_updated = in_array('updated_at', $cols) ? 'updated_at' : null;
+
+    if (!$col_pass || !$col_points) return null;
+
+    $sql = "SELECT `" . $mysqli->real_escape_string($col_points) . "` AS points"
+         . ($col_tier ? ", `" . $mysqli->real_escape_string($col_tier) . "` AS tier" : "")
+         . ($col_updated ? ", `" . $mysqli->real_escape_string($col_updated) . "` AS updated_at" : "")
+         . " FROM `{$table}` WHERE `" . $mysqli->real_escape_string($col_pass) . "` = ? LIMIT 1";
+
+    $stmt = $mysqli->prepare($sql);
+    if (!$stmt) return null;
+    $stmt->bind_param('s', $passport);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$row) return null;
+    return $row;
+}
+
+function compute_points_from_spend($mysqli, $passport) {
+    // 1) Try ticket table (preferred) -> sum ticket.price
+    $total = 0.0;
+    $stmt = $mysqli->prepare("SELECT COALESCE(SUM(price),0) AS s FROM ticket WHERE passport_no = ?");
+    if ($stmt) {
+        $stmt->bind_param('s', $passport);
+        $stmt->execute();
+        $r = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $total = floatval($r['s'] ?? 0);
+    }
+
+    // 2) Fallback: bookings -> join flight price
+    if ($total <= 0) {
+        // detect flight table name for join
+        $flight_table = $mysqli->query("SHOW TABLES LIKE 'flight'")->num_rows > 0 ? 'flight' : (
+                        $mysqli->query("SHOW TABLES LIKE 'flights'")->num_rows > 0 ? 'flights' : 'flight');
+        // Determine a plausible price column
+        $price_col = 'price';
+        $cols = [];
+        $cres = $mysqli->query("SHOW COLUMNS FROM `{$flight_table}`");
+        if ($cres) while ($c = $cres->fetch_assoc()) $cols[] = $c['Field'];
+        if (!in_array('price', $cols)) {
+            if (in_array('base_price', $cols)) $price_col = 'base_price';
+            elseif (in_array('fare', $cols)) $price_col = 'fare';
+        }
+
+        $sql = "SELECT COALESCE(SUM(COALESCE(f.`{$price_col}`,0)),0) AS s
+                FROM bookings b
+                LEFT JOIN `{$flight_table}` f ON b.flight_id = f.flight_id
+                WHERE b.passport_no = ?";
+        $stmt2 = $mysqli->prepare($sql);
+        if ($stmt2) {
+            $stmt2->bind_param('s', $passport);
+            $stmt2->execute();
+            $rr = $stmt2->get_result()->fetch_assoc();
+            $stmt2->close();
+            $total = floatval($rr['s'] ?? 0);
+        }
+    }
+
+    // convert spend -> points. RULE: 1 point per 100 currency units (adjust as needed)
+    $points = floor($total / 100.0);
+    return ['points' => intval($points), 'spend' => $total];
+}
+
+function compute_tier_from_points($points) {
+    // simple thresholds; customize as needed
+    if ($points >= 5000) return 'Platinum';
+    if ($points >= 2000) return 'Gold';
+    if ($points >= 750)  return 'Silver';
+    return 'Bronze';
+}
+
+/* ---------- Determine loyalty data ---------- */
+$loyalty_table = detect_loyalty_table($mysqli);
+$loyalty = [
+    'points' => 0,
+    'tier'   => 'Bronze',
+    'source' => 'computed', // or 'table'
+    'spend'  => 0.0,
+    'updated_at' => null
+];
+
+if ($loyalty_table) {
+    $lr = fetch_loyalty_from_table($mysqli, $loyalty_table, $passport_no);
+    if ($lr) {
+        $loyalty['points'] = isset($lr['points']) ? (int)$lr['points'] : 0;
+        $loyalty['tier']   = isset($lr['tier']) && $lr['tier'] !== '' ? $lr['tier'] : compute_tier_from_points($loyalty['points']);
+        $loyalty['source'] = 'table';
+        $loyalty['updated_at'] = $lr['updated_at'] ?? null;
+    } else {
+        // no row for user in table; compute from spend as fallback
+        $c = compute_points_from_spend($mysqli, $passport_no);
+        $loyalty['points'] = $c['points'];
+        $loyalty['spend'] = $c['spend'];
+        $loyalty['tier'] = compute_tier_from_points($c['points']);
+        $loyalty['source'] = 'computed';
+    }
+} else {
+    // no loyalty table: compute points from spend
+    $c = compute_points_from_spend($mysqli, $passport_no);
+    $loyalty['points'] = $c['points'];
+    $loyalty['spend'] = $c['spend'];
+    $loyalty['tier'] = compute_tier_from_points($c['points']);
+    $loyalty['source'] = 'computed';
+}
+
+/* ---------- rest of your profile handlers (DELETE / UPDATE) ---------- */
+/* ---------- DELETE ACCOUNT handler ---------- */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_account') {
     // server-side safety: passport matches session
     $del_passport = $passport_no;
@@ -88,10 +218,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         // continue to render the page so user sees the flash error after header include
     }
 }
-// ---------- end delete handler ----------
+/* ---------- end delete handler ---------- */
 
 
-// ---------- PROFILE UPDATE handler ----------
+/* ---------- PROFILE UPDATE handler ---------- */
+$has_age_col = col_exists($mysqli, 'passenger', 'age');
+$has_dob_col  = col_exists($mysqli, 'passenger', 'dob');
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_profile') {
     $phone = trim($_POST['phone'] ?? '');
     $age   = trim($_POST['age'] ?? '');
@@ -170,14 +303,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit;
     }
 }
-// ---------- end update handler ----------
+/* ---------- end update handler ---------- */
 
-
-// now include header (safe — all POST handlers that redirect already exited)
+/* now include header and render page (GET) */
 require_once __DIR__ . '/../includes/header.php';
 
-
-// GET: fetch user record
+/* GET: fetch user record */
 $select_cols = "name, email, passport_no, phone";
 if ($has_age_col) $select_cols .= ", age";
 if ($has_dob_col)  $select_cols .= ", dob";
@@ -193,7 +324,7 @@ if ($stmt) {
     $_SESSION['flash_error'] = "Failed to load profile.";
 }
 
-// compute display age
+/* compute display age */
 $display_age = null;
 if ($has_age_col && isset($user['age']) && $user['age'] !== null && $user['age'] !== '') {
     $display_age = (int)$user['age'];
@@ -210,7 +341,7 @@ if ($has_age_col && isset($user['age']) && $user['age'] !== null && $user['age']
     $display_age = null;
 }
 
-// fetch bookings with airport join for friendly route
+/* fetch bookings with airport join for friendly route */
 $bookings_query = "
   SELECT b.booking_id,
          f.flight_id,
@@ -264,23 +395,80 @@ if ($stmt2) {
       <div class="alert alert-danger"><?php echo htmlspecialchars($_SESSION['flash_error']); unset($_SESSION['flash_error']); ?></div>
     <?php endif; ?>
 
-    <div id="viewProfile">
-      <div class="row mb-3">
-        <div class="col-md-6">
-          <p><strong>📧 Email:</strong> <?php echo safe_val($user['email']); ?></p>
-          <p><strong>🪪 Passport No:</strong> <?php echo safe_val($user['passport_no']); ?></p>
-          <p><strong>📞 Phone:</strong> <?php echo safe_val($user['phone']); ?></p>
-          <p><strong>🎂 Age:</strong> <?php echo $display_age !== null ? safe_val($display_age) : '—'; ?>
-            <?php if ($display_age === null && $has_dob_col && empty($user['dob'])): ?>
-              <br><small class="text-muted">No DOB/age on file</small>
-            <?php elseif ($has_dob_col && !$has_age_col): ?>
-              <br><small class="text-muted">Age computed from DOB</small>
+    <div class="row mb-3">
+      <div class="col-md-7">
+        <p><strong>📧 Email:</strong> <?php echo safe_val($user['email']); ?></p>
+        <p><strong>🪪 Passport No:</strong> <?php echo safe_val($user['passport_no']); ?></p>
+        <p><strong>📞 Phone:</strong> <?php echo safe_val($user['phone']); ?></p>
+        <p><strong>🎂 Age:</strong> <?php echo $display_age !== null ? safe_val($display_age) : '—'; ?>
+          <?php if ($display_age === null && $has_dob_col && empty($user['dob'])): ?>
+            <br><small class="text-muted">No DOB/age on file</small>
+          <?php elseif ($has_dob_col && !$has_age_col): ?>
+            <br><small class="text-muted">Age computed from DOB</small>
+          <?php endif; ?>
+        </p>
+      </div>
+
+      <!-- Loyalty card -->
+      <div class="col-md-5">
+        <div class="border rounded-3 p-3" style="background:#f8fbff">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div style="font-size:0.85rem;color:#6b7280">Loyalty</div>
+              <div style="font-weight:800;font-size:1.35rem;color:#0b63c6"><?php echo safe_val($loyalty['tier']); ?></div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:0.85rem;color:#6b7280">Points</div>
+              <div style="font-weight:800;font-size:1.35rem;color:#0b3f8a"><?php echo number_format($loyalty['points']); ?></div>
+            </div>
+          </div>
+
+          <div style="margin:10px 0">
+            <?php
+              // progress to next tier (simple thresholds)
+              $pts = (int)$loyalty['points'];
+              $nextThreshold = 750;
+              if ($pts >= 5000) $nextThreshold = null; // top
+              elseif ($pts >= 2000) $nextThreshold = 5000;
+              elseif ($pts >= 750) $nextThreshold = 2000;
+              else $nextThreshold = 750;
+
+              if ($nextThreshold) {
+                $pct = min(100, round(($pts / $nextThreshold) * 100, 1));
+                if ($pct < 0) $pct = 0;
+              } else {
+                $pct = 100;
+              }
+            ?>
+            <div style="font-size:.85rem;color:#475569;margin-bottom:6px">
+              <?php if ($nextThreshold): ?>
+                <?php echo safe_val($pts) ?> / <?php echo safe_val($nextThreshold) ?> pts to <?php echo compute_tier_from_points($nextThreshold) ?? 'next tier'; ?>
+              <?php else: ?>
+                Top tier achieved
+              <?php endif; ?>
+            </div>
+            <div style="background:#e6f2ff;border-radius:6px;height:10px;overflow:hidden">
+              <div style="width:<?php echo $pct ?>%;height:100%;background:#0b63c6"></div>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;font-size:.85rem;color:#475569">
+            <strong>Source:</strong> <?php echo safe_val($loyalty['source'] === 'table' ? 'Stored' : 'Computed'); ?>
+            <?php if (!empty($loyalty['updated_at'])): ?>
+              <br><small class="text-muted">Updated: <?php echo htmlspecialchars(date('M d, Y', strtotime($loyalty['updated_at']))); ?></small>
             <?php endif; ?>
-          </p>
+          </div>
+
+          <?php if ($loyalty['source'] === 'computed'): ?>
+            <div class="mt-3">
+              <small class="text-muted">Points computed from historical spend (1pt per ₹100). To persist points create a <code>loyalty</code> table.</small>
+            </div>
+          <?php endif; ?>
         </div>
       </div>
     </div>
 
+    <!-- Edit form (hidden initially) -->
     <div id="editProfile" style="display:none;">
       <form id="profileForm" method="post" action="/FLIGHT_FRONTEND/auth/profile.php#profile" class="row g-3">
         <input type="hidden" name="action" value="update_profile">
@@ -361,7 +549,7 @@ if ($stmt2) {
 <script>
   (function(){
     const editBtn = document.getElementById('editToggleBtn');
-    const viewEl = document.getElementById('viewProfile');
+    const viewEls = document.querySelectorAll('#viewProfile, #viewProfile'); // remains for backward compatibility
     const editEl = document.getElementById('editProfile');
     const cancelBtn = document.getElementById('cancelEditBtn');
     const form = document.getElementById('profileForm');
@@ -373,14 +561,13 @@ if ($stmt2) {
     const deleteForm = document.getElementById('deleteAccountForm');
 
     function showEdit() {
-      viewEl.style.display = 'none';
+      // hide 'view' fields by toggling CSS. For simplicity we just show the edit block we added
       editEl.style.display = 'block';
       editBtn.textContent = 'Close';
       editBtn.classList.remove('btn-outline-primary');
       editBtn.classList.add('btn-outline-secondary');
     }
     function showView() {
-      viewEl.style.display = 'block';
       editEl.style.display = 'none';
       editBtn.textContent = 'Edit';
       editBtn.classList.remove('btn-outline-secondary');
@@ -389,12 +576,14 @@ if ($stmt2) {
       ageError.style.display = 'none';
     }
 
-    editBtn.addEventListener('click', function(){ 
+    editBtn.addEventListener('click', function(){
+      if (!editEl) return;
       if (editEl.style.display === 'none' || editEl.style.display === '') showEdit(); else showView();
     });
     if (cancelBtn) cancelBtn.addEventListener('click', showView);
 
     function validatePhone() {
+      if (!phoneInput) return true;
       phoneError.style.display = 'none';
       const v = phoneInput.value.trim();
       if (!v) return true; // optional
@@ -412,6 +601,7 @@ if ($stmt2) {
       return true;
     }
     function validateAge() {
+      if (!ageInput) return true;
       ageError.style.display = 'none';
       const v = ageInput.value.trim();
       if (!v) return true; // optional
@@ -437,17 +627,21 @@ if ($stmt2) {
     if (phoneInput) phoneInput.addEventListener('input', validatePhone);
     if (ageInput) ageInput.addEventListener('input', validateAge);
 
-    form && form.addEventListener('submit', function(e){
-      const okPhone = validatePhone();
-      const okAge = validateAge();
-      if (!okPhone || !okAge) {
-        e.preventDefault();
-        return false;
-      }
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving...';
-      return true;
-    });
+    if (form) {
+      form.addEventListener('submit', function(e){
+        const okPhone = validatePhone();
+        const okAge = validateAge();
+        if (!okPhone || !okAge) {
+          e.preventDefault();
+          return false;
+        }
+        if (saveBtn) {
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'Saving...';
+        }
+        return true;
+      });
+    }
 
     if (deleteForm) {
       deleteForm.addEventListener('submit', function(e){
@@ -457,6 +651,7 @@ if ($stmt2) {
     }
 
     <?php if (!empty($_SESSION['flash_error'])): ?>
+      // show edit if there was a server error during update
       showEdit();
     <?php endif; ?>
   })();
