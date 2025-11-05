@@ -19,8 +19,9 @@ $current = strtolower(basename($_SERVER['PHP_SELF'] ?? ''));
 $logged_in = !empty($_SESSION['passport_no']);
 $user_name = htmlspecialchars($_SESSION['name'] ?? $_SESSION['user_name'] ?? 'Passenger', ENT_QUOTES);
 $user_phone = htmlspecialchars($_SESSION['phone'] ?? '', ENT_QUOTES);
-
-?><!doctype html>
+$is_admin = !empty($_SESSION['is_admin']); // admin flag
+?>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -52,14 +53,27 @@ $user_phone = htmlspecialchars($_SESSION['phone'] ?? '', ENT_QUOTES);
         <li class="nav-item">
           <a class="nav-link <?php echo ($current === 'search.php' || $current === 'index.php') ? 'active' : ''; ?>"
              href="<?php echo $BASE; ?>/search.php">Search</a>
+        </li>
         <li class="nav-item">
-          <li class="nav-item"><a class="nav-link" href="/FLIGHT_FRONTEND/flight_board.php">Flight Board</a></li>
-</li>
-
+          <a class="nav-link <?php echo ($current === 'flight_board.php') ? 'active' : ''; ?>"
+             href="<?php echo $BASE; ?>/flight_board.php">Flight Board</a>
         </li>
       </ul>
 
       <div class="ms-auto d-flex align-items-center gap-2">
+        <!-- Admin button: ALWAYS visible -->
+        <?php if ($is_admin): ?>
+          <!-- admin signed-in: highlighted access to admin dashboard -->
+          <a class="btn btn-sm btn-warning me-2" href="<?php echo $BASE; ?>/admin/todays_flights.php" title="Go to Admin Dashboard">
+            ⚙️ Admin
+          </a>
+        <?php else: ?>
+          <!-- not signed-in as admin: link to admin login -->
+          <a class="btn btn-sm btn-outline-warning me-2" href="<?php echo $BASE; ?>/admin/login.php" title="Admin login">
+            ⚙️ Admin
+          </a>
+        <?php endif; ?>
+
         <?php if ($logged_in): ?>
           <span class="text-light small me-2">
             👋 Hi, <?php echo $user_name; ?><?php echo $user_phone ? " | 📞 {$user_phone}" : ''; ?>
@@ -67,18 +81,14 @@ $user_phone = htmlspecialchars($_SESSION['phone'] ?? '', ENT_QUOTES);
 
           <a class="btn btn-sm btn-light" href="<?php echo $BASE; ?>/my_bookings.php">My Bookings</a>
 
-         <div class="d-flex align-items-center gap-2">
-          <a class="btn btn-sm btn-outline-light" href="<?php echo $BASE; ?>/auth/profile.php">Profile</a>
-          <a class="btn btn-sm btn-danger" href="<?php echo $BASE; ?>/auth/logout.php">Logout</a>
-        </div>
+          <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-outline-light" href="<?php echo $BASE; ?>/auth/profile.php">Profile</a>
+            <a class="btn btn-sm btn-danger" href="<?php echo $BASE; ?>/auth/logout.php">Logout</a>
+          </div>
 
         <?php else: ?>
           <a class="btn btn-sm btn-light" href="<?php echo $BASE; ?>/auth/login.php">Login</a>
           <a class="btn btn-sm btn-outline-light" href="<?php echo $BASE; ?>/auth/register.php">Register</a>
-        <?php endif; ?>
-
-        <?php if (!empty($_SESSION['is_admin'])): ?>
-          <a class="btn btn-sm btn-warning ms-2" href="<?php echo $BASE; ?>/admin/todays_flights.php">Admin</a>
         <?php endif; ?>
       </div>
     </div>

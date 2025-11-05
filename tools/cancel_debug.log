@@ -1,0 +1,18 @@
+[2025-11-04 05:30:17] Exception: Unknown column 'processed_at' in 'field list' -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(173): mysqli->prepare('INSERT INTO ref...')
+#1 {main}
+[2025-11-04 05:35:53] Exception: Unknown column 'processed_at' in 'field list' -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(173): mysqli->prepare('INSERT INTO ref...')
+#1 {main}
+[2025-11-04 05:36:01] Exception: Unknown column 'processed_at' in 'field list' -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(173): mysqli->prepare('INSERT INTO ref...')
+#1 {main}
+[2025-11-04 06:28:02] Exception: Unknown column 'processed_at' in 'field list' -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(173): mysqli->prepare('INSERT INTO ref...')
+#1 {main}
+[2025-11-04 16:58:42] Exception: Unknown column 'processed_at' in 'field list' -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(173): mysqli->prepare('INSERT INTO ref...')
+#1 {main}
+[2025-11-05 05:33:34] Exception: Field 'refund_id' doesn't have a default value -- Trace: #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(176): mysqli_stmt->execute()
+#1 {main}
+[2025-11-05 20:25:25] Cancel request booking_id=31 passport=P000342
+[2025-11-05 20:25:25] price resolved for 31: 2,171.00
+[2025-11-05 20:25:25] surcharge=250, refund=1921
+[2025-11-05 20:25:25] EXCEPTION: Unknown column 'booking_id' in 'where clause'
+[2025-11-05 20:25:25] #0 C:\xampp\htdocs\flight_frontend\cancel_booking.php(225): mysqli->prepare('UPDATE ticket S...')
+#1 {main}

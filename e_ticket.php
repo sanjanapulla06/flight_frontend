@@ -172,30 +172,43 @@ if ($booking_id !== null && $booking_id !== '') {
 }
 
 // 2) ticket lookup by ticket_no
+// 2) ticket lookup by ticket_no
 if (!$data && $ticket_no) {
+    // Prefer live bookings values when ticket is tied to a booking_id.
     $sql = "
-      SELECT t.ticket_no, t.booking_date, t.passport_no AS booked_passport, t.seat_no, t.class,
-             f.flight_id, {$pnr_frag}, {$src_select}, {$dst_select},
-             {$d_time_frag}, {$a_time_frag}, {$price_frag},
-             {$airline_select},
-             {$ground_select_fragment}
+      SELECT
+        t.ticket_no,
+        COALESCE(b.booking_id, t.booking_id) AS booking_id,
+        COALESCE(b.booking_date, t.booking_date) AS booking_date,
+        COALESCE(b.status, t.status) AS status,
+        COALESCE(b.seat_no, t.seat_no) AS seat_no,
+        COALESCE(b.class, t.class) AS class,
+        COALESCE(b.flight_id, t.flight_id) AS flight_id,
+        {$pnr_frag},
+        {$src_select}, {$dst_select},
+        {$d_time_frag}, {$a_time_frag}, {$price_frag},
+        {$airline_select},
+        {$ground_select_fragment}
       FROM ticket t
-      LEFT JOIN {$flight_table} f ON t.flight_id = f.flight_id
+      LEFT JOIN bookings b ON t.booking_id = b.booking_id
+      LEFT JOIN {$flight_table} f ON COALESCE(b.flight_id, t.flight_id) = f.flight_id
       {$src_join} {$dst_join} {$airline_join}
       {$ground_join_fragment}
-      WHERE t.ticket_no = ? AND t.passport_no = ? LIMIT 1
+      WHERE t.ticket_no = ? AND t.passport_no = ?
+      LIMIT 1
     ";
     $stmt = $mysqli->prepare($sql);
     if ($stmt) {
         $stmt->bind_param('ss', $ticket_no, $passport);
         $stmt->execute();
         $data = $stmt->get_result()->fetch_assoc();
-        if ($data) $source_table = 'ticket';
+        if ($data) $source_table = 'ticket_with_booking_prefer_booking';
         $stmt->close();
     } else {
-        error_log("e_ticket: ticket prepare failed: " . $mysqli->error);
+        error_log("e_ticket: ticket_with_booking prepare failed: " . $mysqli->error);
     }
 }
+
 
 // 3) latest ticket for passport
 if (!$data) {
