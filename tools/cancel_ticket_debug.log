@@ -12,3 +12,4 @@
 [2025-11-05 19:40:09] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
 [2025-11-05 19:53:41] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
 [2025-11-05 19:59:22] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-05 20:31:35] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
