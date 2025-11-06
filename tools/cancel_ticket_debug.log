@@ -13,3 +13,34 @@
 [2025-11-05 19:53:41] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
 [2025-11-05 19:59:22] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
 [2025-11-05 20:31:35] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 08:43:08] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 08:59:14] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:05:44] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:13:40] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:10] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:10] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:17:11] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:11] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:17:11] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:11] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:17:11] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:11] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:17:12] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:17:12] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:20:43] Exception cancel_ticket: Unknown column 'booking_id' in 'where clause'
+[2025-11-06 09:20:43] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(77): mysqli->prepare('SELECT `price` ...')
+#1 {main}
+[2025-11-06 09:29:06] cancel_ticket called booking_id=30 by passport=P000342
+[2025-11-06 09:29:06] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-06 09:29:06] Ticket table present but missing booking-FK or price column (booking_col=, price_col=price)
+[2025-11-06 09:29:06] Bookings cols: booking_id,flight_id,passport_no,booking_date,status,seat_no,class
+[2025-11-06 09:29:06] No price-like column found in bookings table.
+[2025-11-06 09:29:06] Resolved price for 30: 2,345.00
+[2025-11-06 09:29:06] surcharge=250 refund=2095
+[2025-11-06 09:29:06] Cannot update tickets: no booking FK and passport/flight columns absent in ticket table.
+[2025-11-06 09:29:06] Refund created for 30 amt=2095

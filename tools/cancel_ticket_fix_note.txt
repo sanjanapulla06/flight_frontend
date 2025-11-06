@@ -1,0 +1,17 @@
+Fix applied to api/cancel_ticket.php (2025-11-06):
+
+- Price lookup made more robust:
+  - Try 'ticket' and 'tickets' tables for a price column (prepared statements).
+  - If no ticket price found, fallback uses a discovered flights table (flight|flights|flight_master|flights_master).
+  - Dynamically finds price and id columns (price, base_price, fare, amount; flight_id, id, flight_no) and queries by flight_id.
+  - Removed brittle JOIN that assumed table/column names (previous source could trigger errors like "Unknown column 'b.price'").
+
+Notes/assumptions:
+- Assumes bookings table contains a flight identifier in a column named like flight_id/flight/flight_no.
+- Does not change other parts of the cancellation flow.
+
+Recommended next steps for you (run locally):
+1) Make a backup of your DB.
+2) Hit the cancel endpoint (api/cancel_ticket.php) via POST with booking_id and an authenticated session.
+3) Check tools/cancel_ticket_debug.log for new entries.
+4) If there are still errors, paste the full debug entry here and I will iterate.
