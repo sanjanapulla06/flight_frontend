@@ -1,5 +1,5 @@
 <?php
-// auth_check.php
+// auth_check.php - put under /FLIGHT_FRONTEND/admin/includes/auth_check.php
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (empty($_SESSION['is_admin']) || $_SESSION['is_admin'] !== true) {
     // redirect to login and preserve return URL

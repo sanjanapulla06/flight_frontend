@@ -64,12 +64,12 @@ $is_admin = !empty($_SESSION['is_admin']); // admin flag
         <!-- Admin button: ALWAYS visible -->
         <?php if ($is_admin): ?>
           <!-- admin signed-in: highlighted access to admin dashboard -->
-          <a class="btn btn-sm btn-warning me-2" href="<?php echo $BASE; ?>/admin/todays_flights.php" title="Go to Admin Dashboard">
+          <a class="btn btn-sm btn-warning me-2" href="<?php echo $BASE; ?>/admin/admin_login.php" title="Go to Admin Dashboard">
             ⚙️ Admin
           </a>
         <?php else: ?>
           <!-- not signed-in as admin: link to admin login -->
-          <a class="btn btn-sm btn-outline-warning me-2" href="<?php echo $BASE; ?>/admin/login.php" title="Admin login">
+          <a class="btn btn-sm btn-outline-warning me-2" href="<?php echo $BASE; ?>/admin/admin_login.php" title="Admin login">
             ⚙️ Admin
           </a>
         <?php endif; ?>

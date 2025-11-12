@@ -127,10 +127,15 @@ $res = $mysqli->query("
 if ($res) while ($r = $res->fetch_assoc()) $recentFlights[] = $r;
 
 $ground_map = [];
-$gres = $mysqli->query("SELECT flight_id, terminal, gate, baggage_belt FROM flight_ground_info");
-if ($gres) while ($g = $gres->fetch_assoc()) $ground_map[$g['flight_id']] = $g;
+if ($recentFlights) {
+    $flight_ids = array_map(fn($f) => "'" . $mysqli->real_escape_string($f['flight_id']) . "'", $recentFlights);
+    $id_list = implode(',', $flight_ids);
+    $gres = $mysqli->query("SELECT flight_id, terminal, gate, baggage_belt FROM flight_ground_info WHERE flight_id IN ($id_list)");
+    if ($gres) while ($g = $gres->fetch_assoc()) $ground_map[$g['flight_id']] = $g;
+}
 
-require_once _DIR_ . '/../includes/header.php';
+
+require_once __DIR__ . '/../includes/header.php';
 ?>
 
 <div class="container my-4">
@@ -164,7 +169,7 @@ require_once _DIR_ . '/../includes/header.php';
         <button class="btn btn-primary w-100 dropdown-toggle" type="button" id="employeeDropdown" data-bs-toggle="dropdown" aria-expanded="false">Employee</button>
         <ul class="dropdown-menu w-100" aria-labelledby="employeeDropdown">
           <li><a class="dropdown-item" href="/FLIGHT_FRONTEND/admin/add_employee.php">➕ Add Employee</a></li>
-          <li><a class="dropdown-item" href="/FLIGHT_FRONTEND/admin/manage_employees.php">🗂 Manage Employees</a></li>
+          <li><a class="dropdown-item" href="/FLIGHT_FRONTEND/admin/manage_employee.php">🗂 Manage Employees</a></li>
           <li><a class="dropdown-item" href="/FLIGHT_FRONTEND/admin/view_employee.php">👤 View Employee</a></li>
         </ul>
       </div>

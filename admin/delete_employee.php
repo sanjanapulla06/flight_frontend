@@ -1,8 +1,8 @@
 // delete_employee.php
 <?php
 session_start();
-require_once _DIR_ . '/includes/auth_check.php';
-require_once _DIR_ . '/../includes/db.php';
+require_once __DIR__ . '/includes/auth_check.php';
+require_once __DIR__ . '/../includes/db.php';
 
 $admin_id = $_SESSION['admin_id'] ?? null;
 if (!$admin_id) {

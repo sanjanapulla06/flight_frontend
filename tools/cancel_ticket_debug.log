@@ -44,3 +44,86 @@
 [2025-11-06 09:29:06] surcharge=250 refund=2095
 [2025-11-06 09:29:06] Cannot update tickets: no booking FK and passport/flight columns absent in ticket table.
 [2025-11-06 09:29:06] Refund created for 30 amt=2095
+[2025-11-07 10:02:45] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 10:02:45] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 10:02:45] Ticket table present but missing booking-FK or price column (booking_col=, price_col=price)
+[2025-11-07 10:02:45] Bookings cols: booking_id,flight_id,passport_no,booking_date,status,seat_no,class
+[2025-11-07 10:02:45] No price-like column found in bookings table.
+[2025-11-07 10:02:45] Resolved price for 33: 2,118.00
+[2025-11-07 10:02:45] surcharge=250 refund=1868
+[2025-11-07 10:02:45] Cannot update tickets: no booking FK and passport/flight columns absent in ticket table.
+[2025-11-07 10:02:45] EXCEPTION: Duplicate entry '' for key 'refunds.PRIMARY'
+[2025-11-07 10:02:45] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(293): mysqli_stmt->execute()
+#1 {main}
+[2025-11-07 10:10:24] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 10:10:24] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 10:10:24] Ticket table present but missing booking-FK or price column (booking_col=, price_col=price)
+[2025-11-07 10:10:24] Bookings cols: booking_id,flight_id,passport_no,booking_date,status,seat_no,class
+[2025-11-07 10:10:24] No price-like column found in bookings table.
+[2025-11-07 10:10:24] Resolved price for 33: 2,118.00
+[2025-11-07 10:10:24] surcharge=250 refund=1868
+[2025-11-07 10:10:24] Cannot update tickets: no booking FK and passport/flight columns absent in ticket table.
+[2025-11-07 10:10:24] EXCEPTION: Duplicate entry '' for key 'refunds.PRIMARY'
+[2025-11-07 10:10:24] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(293): mysqli_stmt->execute()
+#1 {main}
+[2025-11-07 11:03:56] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 11:03:56] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:03:56] Ticket table present but missing booking FK or price column
+[2025-11-07 11:03:56] Resolved price for 33: 2,118.00
+[2025-11-07 11:03:56] surcharge=250 refund=1868
+[2025-11-07 11:03:56] EXCEPTION: Unknown column 'cancelled_at' in 'field list'
+#0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(151): mysqli->prepare('UPDATE bookings...')
+#1 {main}
+[2025-11-07 11:05:59] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 11:05:59] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:05:59] Ticket table present but missing booking-FK or price column (booking_col=, price_col=price)
+[2025-11-07 11:05:59] Bookings cols: booking_id,flight_id,passport_no,booking_date,status,seat_no,class
+[2025-11-07 11:05:59] No price-like column found in bookings table.
+[2025-11-07 11:05:59] Resolved price for 33: 2,118.00
+[2025-11-07 11:05:59] surcharge=250 refund=1868
+[2025-11-07 11:05:59] Cannot update tickets: no booking FK and passport/flight columns absent in ticket table.
+[2025-11-07 11:05:59] EXCEPTION: Duplicate entry '' for key 'refunds.PRIMARY'
+[2025-11-07 11:05:59] #0 C:\xampp\htdocs\flight_frontend\api\cancel_ticket.php(293): mysqli_stmt->execute()
+#1 {main}
+[2025-11-07 11:07:22] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 11:07:22] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:07:22] Ticket table present but missing booking FK or price column
+[2025-11-07 11:07:22] Resolved price for 33: 2,118.00
+[2025-11-07 11:07:22] surcharge=250 refund=1868
+[2025-11-07 11:07:22] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 11:07:35] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 11:07:35] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:07:35] Ticket table present but missing booking FK or price column
+[2025-11-07 11:07:35] Resolved price for 33: 2,118.00
+[2025-11-07 11:07:35] surcharge=250 refund=1868
+[2025-11-07 11:07:35] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 11:08:02] cancel_ticket called booking_id=33 by passport=P000342
+[2025-11-07 11:08:02] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:08:02] Ticket table present but missing booking FK or price column
+[2025-11-07 11:08:02] Resolved price for 33: 2,118.00
+[2025-11-07 11:08:02] surcharge=250 refund=1868
+[2025-11-07 11:08:02] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 11:41:27] cancel_ticket called booking_id=34 by passport=P000342
+[2025-11-07 11:41:27] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 11:41:27] Ticket table present but missing booking FK or price column
+[2025-11-07 11:41:27] Resolved price for 34: 2,342.00
+[2025-11-07 11:41:27] surcharge=250 refund=2092
+[2025-11-07 11:41:27] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 13:52:55] cancel_ticket called booking_id=34 by passport=P000342
+[2025-11-07 13:52:55] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 13:52:55] Ticket table present but missing booking FK or price column
+[2025-11-07 13:52:55] Resolved price for 34: 2,347.00
+[2025-11-07 13:52:55] surcharge=250 refund=2097
+[2025-11-07 13:52:55] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 14:59:15] cancel_ticket called booking_id=35 by passport=P000342
+[2025-11-07 14:59:15] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 14:59:15] Ticket table present but missing booking FK or price column
+[2025-11-07 14:59:15] Resolved price for 35: 2,324.00
+[2025-11-07 14:59:15] surcharge=250 refund=2074
+[2025-11-07 14:59:15] Ticket table has no status/cancelled_at cols (skipped).
+[2025-11-07 20:56:00] cancel_ticket called booking_id=35 by passport=P000342
+[2025-11-07 20:56:00] Ticket table detected: ticket (cols: ticket_no,flight_id,passport_no,price,seat_no,class)
+[2025-11-07 20:56:00] Ticket table present but missing booking FK or price column
+[2025-11-07 20:56:00] Resolved price for 35: 2,324.00
+[2025-11-07 20:56:00] surcharge=250 refund=2074
+[2025-11-07 20:56:00] Ticket table has no status/cancelled_at cols (skipped).
