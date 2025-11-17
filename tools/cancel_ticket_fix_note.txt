@@ -15,3 +15,30 @@ Recommended next steps for you (run locally):
 2) Hit the cancel endpoint (api/cancel_ticket.php) via POST with booking_id and an authenticated session.
 3) Check tools/cancel_ticket_debug.log for new entries.
 4) If there are still errors, paste the full debug entry here and I will iterate.
+
+---
+
+E-ticket reschedule fix applied (2025-11-17):
+
+- Enhanced e_ticket.php to show updated departure date after rescheduling:
+  - Now checks reschedule_tx for latest reschedule transaction
+  - Refreshes booking data to get the updated flight_id from bookings table
+  - Displays reschedule note ("Rescheduled on [date]") below booking info
+  - Forces live flight override to fetch fresh departure/arrival times from flights table
+  
+The e-ticket will now always show the NEW departure date/time after a successful reschedule.
+
+How it works:
+1. User reschedules booking via my_bookings.php (auto_process=1)
+2. Reschedule API updates bookings.flight_id with new flight
+3. E-ticket queries reschedule_tx, finds new_flight_id, refreshes booking data
+4. E-ticket does forced override to fetch fresh flight details (including new departure_time)
+5. New date displays in all sections of the boarding pass
+
+Test steps:
+1. Book a flight
+2. Reschedule it to a different date
+3. View e-ticket (via my_bookings "View E-ticket" link)
+4. Verify the departure date shows the NEW date (not original)
+5. Look for "Rescheduled on [date]" note below "Booked on" line
+

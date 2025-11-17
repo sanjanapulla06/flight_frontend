@@ -260,9 +260,12 @@ if (!$data) {
 
 /* ---------- If rescheduled, prefer the latest new_flight_id from reschedule_tx ---------- */
 $flight_id = $data['flight_id'] ?? null;
+$reschedule_note = null;
+$booking_updated = false;
+
 if ($booking_id && $mysqli->query("SHOW TABLES LIKE 'reschedule_tx'")->num_rows > 0) {
     $rs = $mysqli->prepare("
-        SELECT new_flight_id
+        SELECT new_flight_id, requested_date, status, COALESCE(processed_at, created_at) AS tx_time
         FROM reschedule_tx
         WHERE booking_id = ?
         ORDER BY COALESCE(processed_at, created_at) DESC
@@ -273,8 +276,38 @@ if ($booking_id && $mysqli->query("SHOW TABLES LIKE 'reschedule_tx'")->num_rows 
         $rs->execute();
         $rsrow = $rs->get_result()->fetch_assoc();
         $rs->close();
-        if (!empty($rsrow['new_flight_id'])) {
-            $flight_id = $rsrow['new_flight_id']; // override with the rescheduled flight id
+        if ($rsrow) {
+            // Always prefer new_flight_id if present (user explicitly chose a flight)
+            if (!empty($rsrow['new_flight_id'])) {
+                $flight_id = $rsrow['new_flight_id']; // override with the rescheduled flight id
+                $booking_updated = true;
+                if ($rsrow['status'] === 'completed' || $rsrow['status'] === 'processed') {
+                    $reschedule_note = "Rescheduled on " . date('d M Y', strtotime($rsrow['tx_time']));
+                } else {
+                    $reschedule_note = "Reschedule pending";
+                }
+            }
+        }
+    }
+}
+
+// If booking was rescheduled, refresh the booking row to get the latest flight_id from bookings table
+if ($booking_updated && $booking_id) {
+    $refresh_sql = "SELECT flight_id FROM bookings WHERE booking_id = ? LIMIT 1";
+    $refresh_stmt = $mysqli->prepare($refresh_sql);
+    if ($refresh_stmt) {
+        if (ctype_digit((string)$booking_id)) {
+            $bi = (int)$booking_id;
+            $refresh_stmt->bind_param('i', $bi);
+        } else {
+            $refresh_stmt->bind_param('s', $booking_id);
+        }
+        $refresh_stmt->execute();
+        $refresh_row = $refresh_stmt->get_result()->fetch_assoc();
+        $refresh_stmt->close();
+        if ($refresh_row && !empty($refresh_row['flight_id'])) {
+            // Use the booking table's flight_id if it's been updated (takes precedence)
+            $flight_id = $refresh_row['flight_id'];
         }
     }
 }
@@ -432,6 +465,9 @@ if (empty($belt))     $belt = '—';
 
       <div style="margin-top:14px" class="small">
         <strong>Booked on:</strong> <?= hsafe($booked_on) ?> &nbsp; Passport: <?= hsafe($data['booked_passport'] ?? $passport) ?>
+        <?php if ($reschedule_note): ?>
+          <br><span style="color:#0b63c6;font-weight:600;">✓ <?= hsafe($reschedule_note) ?></span>
+        <?php endif; ?>
       </div>
 
       <div style="margin-top:12px; display:flex; gap:10px;">
