@@ -1,1 +1,8 @@
-"database_backup/*.sql" 
+database_backup/*.sql
+*.log
+tools/*.log
+tools/*_debug.log
+includes/db.php
+admin/includes/db.php
+.env
+.env.local 
